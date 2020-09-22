@@ -6,3 +6,4 @@
 /static/upload
 /test/go1.15.2.linux-amd64.tar.gz
 /go_build_main_go.exe
+/service/upload/tmp/

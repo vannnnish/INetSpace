@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"github.com/gin-gonic/gin"
 	"net/http"
 	"netspace/db"
 	"netspace/util"
@@ -12,51 +13,65 @@ const (
 	pwd_salt = "#g325g"
 )
 
-func SignupHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		w.Write([]byte("注册内容"))
-		return
-	}
-	err := r.ParseForm()
-	if err != nil {
-		fmt.Println("表单解析失败:", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	fmt.Println(r.Form)
-	username := r.Form.Get("username")
-	passwd := r.Form.Get("password")
+func SignupHandler(c *gin.Context) {
+	c.Redirect(http.StatusFound, "/static/view/signup.html")
+}
+
+func DoSignupHandler(c *gin.Context) {
+
+	username := c.Request.FormValue("username")
+	passwd := c.Request.FormValue("password")
 	if len(username) < 3 || len(passwd) < 5 {
-		w.Write([]byte("账号密码格式不正确"))
+		c.JSON(http.StatusOK, gin.H{
+			"code": -1,
+			"msg":  "账号密码格式不正确",
+		})
 		return
 	}
 	encPasswd := util.Sha1([]byte(passwd + pwd_salt))
 	suc := db.UserSignUp(username, encPasswd)
 	if suc {
-		w.Write([]byte("Success"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "Success",
+			"code": 0,
+		})
+		return
 	} else {
-		w.Write([]byte("Failed"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "Fail",
+			"code": -1,
+		})
+		return
 	}
 }
 
 // SignInHandler:登录接口
-func SignInHandler(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	username := r.Form.Get("username")
-	password := r.Form.Get("password")
+func SignInHandler(c *gin.Context) {
+	c.Redirect(http.StatusFound, "/static/view/signin.html")
+}
+
+func DoSignInHandler(c *gin.Context) {
+	username := c.Request.FormValue("username")
+	password := c.Request.FormValue("password")
 	encPassword := util.Sha1([]byte(password + pwd_salt))
 	fmt.Println(encPassword)
 	// 1. 校验用户名称及密
 	pwdChecked := db.UserSignIn(username, encPassword)
 	if !pwdChecked {
-		w.Write([]byte("密码错误 Failed"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "密码错误 Failed",
+			"code": -1,
+		})
 		return
 	}
 	// 2. 生成访问凭证
 	token := GetToken(username)
 	updateToken := db.UpdateToken(username, token)
 	if !updateToken {
-		w.Write([]byte("访问凭证 Faild"))
+		c.JSON(http.StatusOK, gin.H{
+			"msg":  "密码错误 Failed",
+			"code": -1,
+		})
 		return
 	}
 	// 3. 返回登录成功信息
@@ -69,29 +84,29 @@ func SignInHandler(w http.ResponseWriter, r *http.Request) {
 			Username string
 			Token    string
 		}{
-			Location: "http://" + r.Host + "/static/view/home.html",
+			Location: "/static/view/home.html",
 			Username: username,
 			Token:    token,
 		},
 	}
-	w.Write(msg.JSONBytes())
+
+	c.Data(http.StatusOK, "application/json", msg.JSONBytes())
 }
 
-func UserInfoHandler(w http.ResponseWriter, r *http.Request) {
+func UserInfoHandler(c *gin.Context) {
 	// 1. 解析请求参数
-	r.ParseForm()
-	username := r.Form.Get("username")
-/*	token := r.Form.Get("token")
-	// 2. 验证token是否有效
-	isValidToken := IsTokenValid(token)
-	if !isValidToken {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}*/
+	username := c.Request.FormValue("username")
+	/*	token := r.Form.Get("token")
+		// 2. 验证token是否有效
+		isValidToken := IsTokenValid(token)
+		if !isValidToken {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}*/
 	// 3. 查询用户信息
 	user, err := db.GetUserInfo(username)
 	if err != nil {
-		w.WriteHeader(http.StatusForbidden)
+		c.Status(http.StatusForbidden)
 		return
 	}
 	// 4. 组装并且响应用户数据
@@ -100,7 +115,7 @@ func UserInfoHandler(w http.ResponseWriter, r *http.Request) {
 		Msg:  "OK",
 		Data: user,
 	}
-	w.Write(resp.JSONBytes())
+	c.JSON(http.StatusOK, resp.JSONBytes())
 }
 
 func GetToken(username string) string {

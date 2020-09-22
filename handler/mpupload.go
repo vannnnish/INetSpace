@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	redis2 "github.com/garyburd/redigo/redis"
+	"github.com/gin-gonic/gin"
 	"math"
 	"net/http"
 	"netspace/cache/redis"
@@ -24,11 +25,10 @@ type MultipartUploadInfo struct {
 	ChunkCount int
 }
 
-func InitialMultipartUpload(w http.ResponseWriter, r *http.Request) {
-	r.ParseForm()
-	username := r.Form.Get("username")
-	filehash := r.Form.Get("filehash")
-	filesize, _ := strconv.Atoi(r.Form.Get("filesize"))
+func InitialMultipartUpload(c *gin.Context) {
+	username := c.Request.FormValue("username")
+	filehash := c.Request.FormValue("filehash")
+	filesize, _ := strconv.Atoi(c.Request.FormValue("filesize"))
 
 	// 获得一个redis连接
 	rConn := redis.RedisPool().Get()
@@ -47,16 +47,15 @@ func InitialMultipartUpload(w http.ResponseWriter, r *http.Request) {
 	rConn.Do("HSET", "MP_"+uploadInfo.UploadID, "filehash", uploadInfo.FileHash)
 	rConn.Do("HSET", "MP_"+uploadInfo.UploadID, "filesize", uploadInfo.FileSize)
 	// 将响应数据返回给客户端
-	w.Write((&util.RespMsg{Code: 0, Msg: "OK", Data: uploadInfo}).JSONBytes())
+	c.JSON(http.StatusOK, (&util.RespMsg{Code: 0, Msg: "OK", Data: uploadInfo}).JSONBytes())
 }
 
 // 上传文件分块
-func UploadPartHandler(w http.ResponseWriter, r *http.Request) {
+func UploadPartHandler(c *gin.Context) {
 	// 解析用户参数
-	r.ParseForm()
 	//username := r.Form.Get("username")
-	uploadID := r.Form.Get("uploadid")
-	chunkIndex := r.Form.Get("index")
+	uploadID := c.Request.FormValue("uploadid")
+	chunkIndex := c.Request.FormValue("index")
 	// 获取redis连接
 	rConn := redis.RedisPool().Get()
 	defer rConn.Close()
@@ -68,14 +67,14 @@ func UploadPartHandler(w http.ResponseWriter, r *http.Request) {
 	fd, err := os.Create(fPath)
 	if err != nil {
 		fmt.Println("创建文件错误:", err)
-		w.Write(util.NewRespMsg(-1, "upload fail", nil).JSONBytes())
+		c.JSON(http.StatusOK, util.NewRespMsg(-1, "upload fail", nil).JSONBytes())
 		return
 	}
 	defer fd.Close()
 	buf := make([]byte, 1024*1024)
 	// TODO: 可以加CRC 校验
 	for {
-		n, err := r.Body.Read(buf)
+		n, err := c.Request.Body.Read(buf)
 		fd.Write(buf[:n])
 		if err != nil {
 			break
@@ -85,19 +84,18 @@ func UploadPartHandler(w http.ResponseWriter, r *http.Request) {
 	// 更新redis 缓存数据  这里是,根据分块的id, 判断该分块的数据是否完成.
 	rConn.Do("HSET", "MP_"+uploadID, "chkidx_"+chunkIndex, 1)
 	// 返回处理结果给客户端
-	w.Write(util.NewRespMsg(0, "OK", nil).JSONBytes())
+	c.JSON(http.StatusOK, util.NewRespMsg(0, "OK", nil).JSONBytes())
 }
 
 // 通知上传合并接口
 
-func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
+func CompleteUploadHandler(c *gin.Context) {
 	// 解析请求参数
-	r.ParseForm()
-	upid := r.Form.Get("uploadid")
-	username := r.Form.Get("username")
-	filehash := r.Form.Get("filehash")
-	filesize := r.Form.Get("filesize")
-	filename := r.Form.Get("filename")
+	upid := c.Request.FormValue("uploadid")
+	username := c.Request.FormValue("username")
+	filehash := c.Request.FormValue("filehash")
+	filesize := c.Request.FormValue("filesize")
+	filename := c.Request.FormValue("filename")
 
 	// 获取redis连接
 	rConn := redis.RedisPool().Get()
@@ -105,7 +103,7 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 	// 是否所有分块上传完成
 	data, err := redis2.Values(rConn.Do("HGETALL", "MP_"+upid))
 	if err != nil {
-		w.Write(util.NewRespMsg(-1, "complete upload failed", nil).JSONBytes())
+		c.JSON(http.StatusOK, util.NewRespMsg(-1, "complete upload failed", nil).JSONBytes())
 		return
 	}
 	totalCount := 0
@@ -121,7 +119,7 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if totalCount != chunkCount {
-		w.Write(util.NewRespMsg(-1, "invalid request", nil).JSONBytes())
+		c.JSON(http.StatusOK, util.NewRespMsg(-1, "invalid request", nil).JSONBytes())
 		return
 	}
 	// TODO: 所有的分块上传完成后,合并分块
@@ -130,7 +128,7 @@ func CompleteUploadHandler(w http.ResponseWriter, r *http.Request) {
 	db.OnfileUploadFinished(filehash, filename, int64(fsize), "")
 	db.OnUserUploadFinished(username, filehash, filename, int64(fsize))
 	// 响应客户端处理结果
-	w.Write(util.NewRespMsg(0, "OK", nil).JSONBytes())
+	c.JSON(http.StatusOK, util.NewRespMsg(0, "OK", nil).JSONBytes())
 }
 
 // 取消分块上传
